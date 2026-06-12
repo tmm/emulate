@@ -125,6 +125,33 @@ const { app } = createServer(plugin, { baseUrl: 'http://localhost:4000' })
 const server = serve({ fetch: app.fetch, port: 4000 })
 ```
 
+The CLI can load the same style of custom plugin from `emulate.config.ts`:
+
+```typescript
+import { defineConfig } from 'emulate'
+import { createPlugin } from 'emulate/core'
+import { githubPlugin } from 'emulate/plugins'
+
+const github = createPlugin({
+  name: 'github',
+  register(app, store, webhooks, baseUrl, tokenMap) {
+    githubPlugin.register(app, store, webhooks, baseUrl, tokenMap)
+    app.get('/extra', (c) => c.json({ ok: true }))
+  },
+  seed: githubPlugin.seed,
+})
+
+export default defineConfig({
+  services: {
+    github: {
+      plugin: github,
+      port: 4001,
+      seed: { users: [{ login: 'octocat' }] },
+    },
+  },
+})
+```
+
 ## Scoped packages
 
 Each emulator is published as its own `@emulators/*` package. Install only the ones you need:

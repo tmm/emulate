@@ -1,11 +1,9 @@
 import { createServer, serve, type AppKeyResolver, type Store } from "@emulators/core";
-import { SERVICE_REGISTRY, SERVICE_NAMES, type ServiceName } from "../registry.js";
-import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
-import { parse as parseYaml } from "yaml";
+import { SERVICE_REGISTRY, SERVICE_NAMES, type LoadedService, type ServiceEntry, type ServiceName } from "../registry.js";
 import pc from "picocolors";
 import { ensurePortless, registerAliases, removeAliases, portlessBaseUrl, type PortlessAlias } from "../portless.js";
 import { resolveBaseUrl } from "../base-url.js";
+import { loadConfig, type EmulateConfig, type EmulateServiceConfig, type SeedConfig } from "../config.js";
 
 declare const PKG_VERSION: string;
 const pkg = { version: PKG_VERSION };
@@ -13,62 +11,10 @@ const pkg = { version: PKG_VERSION };
 export interface StartOptions {
   port: number;
   service?: string;
+  config?: string;
   seed?: string;
   baseUrl?: string;
   portless?: boolean;
-}
-
-interface SeedConfig {
-  tokens?: Record<string, { login: string; scopes?: string[] }>;
-  [service: string]: unknown;
-}
-
-interface LoadResult {
-  config: SeedConfig;
-  source: string;
-}
-
-function loadSeedConfig(seedPath?: string): LoadResult | null {
-  if (seedPath) {
-    const fullPath = resolve(seedPath);
-    if (!existsSync(fullPath)) {
-      console.error(`Seed file not found: ${fullPath}`);
-      process.exit(1);
-    }
-    const content = readFileSync(fullPath, "utf-8");
-    try {
-      const config = fullPath.endsWith(".json") ? JSON.parse(content) : parseYaml(content);
-      return { config, source: seedPath };
-    } catch (err) {
-      console.error(`Failed to parse ${seedPath}: ${err instanceof Error ? err.message : err}`);
-      process.exit(1);
-    }
-  }
-
-  const autoFiles = [
-    "emulate.config.yaml",
-    "emulate.config.yml",
-    "emulate.config.json",
-    "service-emulator.config.yaml",
-    "service-emulator.config.yml",
-    "service-emulator.config.json",
-  ];
-
-  for (const file of autoFiles) {
-    const fullPath = resolve(file);
-    if (existsSync(fullPath)) {
-      const content = readFileSync(fullPath, "utf-8");
-      try {
-        const config = fullPath.endsWith(".json") ? JSON.parse(content) : parseYaml(content);
-        return { config, source: file };
-      } catch (err) {
-        console.error(`Failed to parse ${file}: ${err instanceof Error ? err.message : err}`);
-        process.exit(1);
-      }
-    }
-  }
-
-  return null;
 }
 
 function inferServicesFromConfig(config: SeedConfig): ServiceName[] | null {
@@ -76,21 +22,73 @@ function inferServicesFromConfig(config: SeedConfig): ServiceName[] | null {
   return found.length > 0 ? [...found] : null;
 }
 
-export async function startCommand(options: StartOptions): Promise<void> {
-  const { port: basePort } = options;
+function fallbackEntry(name: string, plugin: EmulateServiceConfig["plugin"]): ServiceEntry {
+  return {
+    label: `${name} custom emulator`,
+    endpoints: "custom",
+    async load() {
+      if (!plugin) {
+        throw new Error(`Service "${name}" must define a plugin in emulate.config.ts`);
+      }
+      return { plugin };
+    },
+    defaultFallback() {
+      return { login: "admin", id: 1, scopes: [] };
+    },
+    initConfig: {},
+  };
+}
 
-  if (options.portless && options.baseUrl) {
+async function loadService(
+  name: string,
+  entry: ServiceEntry,
+  serviceConfig: EmulateServiceConfig | undefined,
+): Promise<LoadedService> {
+  const builtIn = name in SERVICE_REGISTRY ? await entry.load() : null;
+  if (!serviceConfig?.plugin) return builtIn ?? (await entry.load());
+
+  return {
+    plugin: serviceConfig.plugin,
+    seedFromConfig: serviceConfig.seedFromConfig ?? builtIn?.seedFromConfig,
+    createAppKeyResolver: serviceConfig.createAppKeyResolver ?? builtIn?.createAppKeyResolver,
+  };
+}
+
+function serviceSeedConfig(
+  seedConfig: SeedConfig | null,
+  runtimeConfig: EmulateConfig | undefined,
+  service: string,
+): Record<string, unknown> | undefined {
+  return runtimeConfig?.services?.[service]?.seed ?? (seedConfig?.[service] as Record<string, unknown> | undefined);
+}
+
+export async function startCommand(options: StartOptions): Promise<void> {
+  let loaded;
+  try {
+    loaded = await loadConfig({ configPath: options.config, seedPath: options.seed });
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
+
+  const runtimeConfig = loaded?.runtimeConfig;
+  const basePort = runtimeConfig?.port ?? options.port;
+  const configBaseUrl = runtimeConfig?.baseUrl;
+
+  if (options.portless && (options.baseUrl || configBaseUrl)) {
     console.error("--portless and --base-url are mutually exclusive.");
     process.exit(1);
   }
 
-  const loaded = loadSeedConfig(options.seed);
-  const seedConfig = loaded?.config ?? null;
+  const seedConfig = loaded?.seedConfig ?? null;
   const configSource = loaded?.source ?? null;
+  const runtimeServices = runtimeConfig?.services ?? {};
 
-  let services: ServiceName[];
+  let services: string[];
   if (options.service) {
-    services = options.service.split(",").map((s) => s.trim()) as ServiceName[];
+    services = options.service.split(",").map((s) => s.trim());
+  } else if (Object.keys(runtimeServices).length > 0) {
+    services = Object.keys(runtimeServices);
   } else if (seedConfig) {
     services = inferServicesFromConfig(seedConfig) ?? [...SERVICE_NAMES];
   } else {
@@ -98,7 +96,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   }
 
   for (const svc of services) {
-    if (!SERVICE_REGISTRY[svc]) {
+    if (!SERVICE_REGISTRY[svc as ServiceName] && !runtimeServices[svc]?.plugin) {
       console.error(`Unknown service: ${svc}`);
       process.exit(1);
     }
@@ -119,9 +117,10 @@ export async function startCommand(options: StartOptions): Promise<void> {
   }
 
   interface PreparedService {
-    svc: ServiceName;
-    entry: (typeof SERVICE_REGISTRY)[ServiceName];
-    loadedSvc: Awaited<ReturnType<(typeof SERVICE_REGISTRY)[ServiceName]["load"]>>;
+    svc: string;
+    entry: ServiceEntry;
+    serviceConfig: EmulateServiceConfig | undefined;
+    loadedSvc: LoadedService;
     svcSeedConfig: Record<string, unknown> | undefined;
     port: number;
     baseUrl: string;
@@ -132,24 +131,27 @@ export async function startCommand(options: StartOptions): Promise<void> {
 
   for (let i = 0; i < services.length; i++) {
     const svc = services[i];
-    const entry = SERVICE_REGISTRY[svc];
-    const loadedSvc = await entry.load();
+    const serviceConfig = runtimeServices[svc];
+    const entry = SERVICE_REGISTRY[svc as ServiceName] ?? fallbackEntry(svc, serviceConfig?.plugin);
+    const loadedSvc = await loadService(svc, entry, serviceConfig);
 
-    const svcSeedConfig = seedConfig?.[svc] as Record<string, unknown> | undefined;
-    const port = (svcSeedConfig?.port as number | undefined) ?? basePort + i;
+    const svcSeedConfig = serviceSeedConfig(seedConfig, runtimeConfig, svc);
+    const port = serviceConfig?.port ?? (svcSeedConfig?.port as number | undefined) ?? basePort + i;
 
     if (options.portless) {
       portlessAliases.push({ name: `${svc}.emulate`, port });
     }
 
     const seedBaseUrl =
-      typeof svcSeedConfig?.baseUrl === "string" && svcSeedConfig.baseUrl.length > 0
-        ? svcSeedConfig.baseUrl
-        : undefined;
-    const effectiveBaseUrl = options.portless ? portlessBaseUrl(svc) : options.baseUrl;
+      typeof serviceConfig?.baseUrl === "string" && serviceConfig.baseUrl.length > 0
+        ? serviceConfig.baseUrl
+        : typeof svcSeedConfig?.baseUrl === "string" && svcSeedConfig.baseUrl.length > 0
+          ? svcSeedConfig.baseUrl
+          : undefined;
+    const effectiveBaseUrl = options.portless ? portlessBaseUrl(svc) : (options.baseUrl ?? configBaseUrl);
     const baseUrl = resolveBaseUrl({ service: svc, port, baseUrl: effectiveBaseUrl, seedBaseUrl });
 
-    prepared.push({ svc, entry, loadedSvc, svcSeedConfig, port, baseUrl });
+    prepared.push({ svc, entry, serviceConfig, loadedSvc, svcSeedConfig, port, baseUrl });
   }
 
   if (portlessAliases.length > 0) {
@@ -160,7 +162,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
   const stores: Store[] = [];
   const httpServers: ReturnType<typeof serve>[] = [];
 
-  for (const { svc, entry, loadedSvc, svcSeedConfig, port, baseUrl } of prepared) {
+  for (const { svc, entry, serviceConfig, loadedSvc, svcSeedConfig, port, baseUrl } of prepared) {
     serviceUrls.push({ name: svc, url: baseUrl });
 
     // eslint-disable-next-line prefer-const -- reassigned after closure captures it
@@ -169,7 +171,7 @@ export async function startCommand(options: StartOptions): Promise<void> {
       ? (appId) => cachedResolver!(appId)
       : undefined;
 
-    const fallbackUser = entry.defaultFallback(svcSeedConfig);
+    const fallbackUser = serviceConfig?.defaultFallback?.(svcSeedConfig) ?? entry.defaultFallback(svcSeedConfig);
 
     const { app, store, webhooks } = createServer(loadedSvc.plugin, {
       port,

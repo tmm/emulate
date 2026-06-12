@@ -1,6 +1,6 @@
 # Configuration
 
-Configuration is optional. All services start with sensible defaults. To customize seed data, create `emulate.config.yaml` in your project root (or pass `--seed`):
+Configuration is optional. All services start with sensible defaults. To customize seed data, create `emulate.config.yaml` in your project root or pass `--seed`:
 
 ```yaml
 tokens:
@@ -16,6 +16,33 @@ tokens:
     scopes:
       - repo
       - user
+```
+
+Use `emulate.config.ts` when you need custom plugins, custom ports, or local endpoint additions:
+
+```typescript
+import { defineConfig } from 'emulate'
+import { createPlugin } from 'emulate/core'
+import { githubPlugin } from 'emulate/plugins'
+
+const github = createPlugin({
+  name: 'github',
+  register(app, store, webhooks, baseUrl, tokenMap) {
+    githubPlugin.register(app, store, webhooks, baseUrl, tokenMap)
+    app.get('/extra', (c) => c.json({ ok: true }))
+  },
+  seed: githubPlugin.seed,
+})
+
+export default defineConfig({
+  services: {
+    github: {
+      plugin: github,
+      port: 4001,
+      seed: { users: [{ login: 'octocat' }] },
+    },
+  },
+})
 ```
 
 ## Vercel Seed Config

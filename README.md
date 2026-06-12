@@ -33,6 +33,9 @@ npx emulate --port 3000
 # Use a seed config file
 npx emulate --seed config.yaml
 
+# Use a TypeScript config file with custom plugins
+npx emulate --config emulate.config.ts
+
 # Generate a starter config
 npx emulate init
 
@@ -49,6 +52,7 @@ npx emulate list
 |------|---------|-------------|
 | `-p, --port` | `4000` | Base port (auto-increments per service) |
 | `-s, --service` | all | Comma-separated services to enable |
+| `--config` | auto-detect | Path to an `emulate.config.ts` / `.js` config file |
 | `--seed` | auto-detect | Path to seed config (YAML or JSON) |
 | `--base-url` | none | Override advertised base URL (supports `{service}` template) |
 | `--portless` | off | Serve over HTTPS via portless (auto-registers aliases) |
@@ -156,7 +160,9 @@ afterAll(() => Promise.all([github.close(), vercel.close()]))
 
 ## Configuration
 
-Configuration is optional. The CLI auto-detects config files in this order: `emulate.config.yaml` / `.yml`, `emulate.config.json`, `service-emulator.config.yaml` / `.yml`, `service-emulator.config.json`. Or pass `--seed <file>` explicitly. Run `npx emulate init` to generate a starter file.
+Configuration is optional. The CLI auto-detects config files in this order: `emulate.config.ts`, `emulate.config.mts`, `emulate.config.js`, `emulate.config.mjs`, `emulate.config.yaml` / `.yml`, `emulate.config.json`, `service-emulator.config.yaml` / `.yml`, `service-emulator.config.json`. Pass `--config <file>` for executable config or `--seed <file>` for YAML or JSON seed data. Run `npx emulate init` to generate a starter seed file.
+
+Use `emulate.config.ts` when you need custom plugins, custom ports, or local endpoint additions. Use YAML or JSON when you only need seed data.
 
 ```yaml
 tokens:

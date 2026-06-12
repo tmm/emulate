@@ -62,22 +62,23 @@
   "dependencies": {
     "@emulators/core": "workspace:*",
     "commander": "^14",
+    "jiti": "^2.7.0",
     "picocolors": "^1.1.1",
     "yaml": "^2"
   },
   "devDependencies": {
-    "@emulators/github": "workspace:*",
     "@emulators/apple": "workspace:*",
-    "@emulators/microsoft": "workspace:*",
-    "@emulators/okta": "workspace:*",
     "@emulators/aws": "workspace:*",
-    "@emulators/google": "workspace:*",
-    "@emulators/mongoatlas": "workspace:*",
-    "@emulators/slack": "workspace:*",
-    "@emulators/vercel": "workspace:*",
-    "@emulators/resend": "workspace:*",
-    "@emulators/stripe": "workspace:*",
     "@emulators/clerk": "workspace:*",
+    "@emulators/github": "workspace:*",
+    "@emulators/google": "workspace:*",
+    "@emulators/microsoft": "workspace:*",
+    "@emulators/mongoatlas": "workspace:*",
+    "@emulators/okta": "workspace:*",
+    "@emulators/resend": "workspace:*",
+    "@emulators/slack": "workspace:*",
+    "@emulators/stripe": "workspace:*",
+    "@emulators/vercel": "workspace:*",
     "tsup": "^8",
     "typescript": "^5.7"
   }
