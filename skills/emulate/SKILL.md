@@ -41,6 +41,9 @@ npx emulate --port 3000
 # Use a seed config file
 npx emulate --seed config.yaml
 
+# Use a TypeScript config file with custom plugins
+npx emulate --config emulate.config.ts
+
 # Generate a starter config
 npx emulate init
 
@@ -57,6 +60,7 @@ npx emulate list
 |------|---------|-------------|
 | `-p, --port` | `4000` | Base port (auto-increments per service) |
 | `-s, --service` | all | Comma-separated services to enable |
+| `--config` | auto-detect | Path to an `emulate.config.ts` / `.js` config file |
 | `--seed` | auto-detect | Path to seed config (YAML or JSON) |
 | `--base-url` | none | Override advertised base URL (supports `{service}` template) |
 | `--portless` | off | Serve over HTTPS via portless (auto-registers aliases) |
@@ -149,12 +153,41 @@ afterAll(() => Promise.all([github.close(), vercel.close()]))
 
 Configuration is optional. The CLI auto-detects config files in this order:
 
-1. `emulate.config.yaml` / `.yml`
-2. `emulate.config.json`
-3. `service-emulator.config.yaml` / `.yml`
-4. `service-emulator.config.json`
+1. `emulate.config.ts` / `.mts`
+2. `emulate.config.js` / `.mjs`
+3. `emulate.config.yaml` / `.yml`
+4. `emulate.config.json`
+5. `service-emulator.config.yaml` / `.yml`
+6. `service-emulator.config.json`
 
-Or pass `--seed <file>` explicitly. Run `npx emulate init` to generate a starter file.
+Use `emulate.config.ts` for custom plugins or endpoint additions:
+
+```typescript
+import { defineConfig } from 'emulate'
+import { createPlugin } from 'emulate/core'
+import { githubPlugin } from 'emulate/plugins'
+
+const github = createPlugin({
+  name: 'github',
+  register(app, store, webhooks, baseUrl, tokenMap) {
+    githubPlugin.register(app, store, webhooks, baseUrl, tokenMap)
+    app.get('/extra', (c) => c.json({ ok: true }))
+  },
+  seed: githubPlugin.seed,
+})
+
+export default defineConfig({
+  services: {
+    github: {
+      plugin: github,
+      port: 4001,
+      seed: { users: [{ login: 'octocat' }] },
+    },
+  },
+})
+```
+
+Pass `--config <file>` for executable config or `--seed <file>` for YAML or JSON seed data. Run `npx emulate init` to generate a starter seed file.
 
 ### Config Structure
 

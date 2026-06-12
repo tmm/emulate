@@ -20,6 +20,7 @@ program
   .description("Start the emulator server")
   .option("-p, --port <port>", "Base port", defaultPort)
   .option("-s, --service <services>", "Comma-separated services to enable")
+  .option("--config <file>", "Path to config file")
   .option("--seed <file>", "Path to seed config file")
   .option("--base-url <url>", "Override advertised base URL (supports {service} template)")
   .option("--portless", "Serve over HTTPS via portless (auto-registers aliases)")
@@ -32,6 +33,7 @@ program
     await startCommand({
       port,
       service: opts.service,
+      config: opts.config,
       seed: opts.seed,
       baseUrl: opts.baseUrl,
       portless: opts.portless,
